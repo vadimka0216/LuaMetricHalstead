@@ -1,0 +1,6 @@
+G:\Develops\C#\Holsted\LuaAnalyzConsole\LuaAnalyzConsole\bin\Debug\LuaAnalyzConsole.exe.config
+G:\Develops\C#\Holsted\LuaAnalyzConsole\LuaAnalyzConsole\bin\Debug\LuaAnalyzConsole.exe
+G:\Develops\C#\Holsted\LuaAnalyzConsole\LuaAnalyzConsole\bin\Debug\LuaAnalyzConsole.pdb
+G:\Develops\C#\Holsted\LuaAnalyzConsole\LuaAnalyzConsole\obj\Debug\LuaAnalyzConsole.exe
+G:\Develops\C#\Holsted\LuaAnalyzConsole\LuaAnalyzConsole\obj\Debug\LuaAnalyzConsole.pdb
+G:\Develops\C#\Holsted\LuaAnalyzConsole\LuaAnalyzConsole\obj\Debug\LuaAnalyzConsole.csprojResolveAssemblyReference.cache
