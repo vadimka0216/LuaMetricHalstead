@@ -10,10 +10,14 @@ namespace LuaAnalyzConsole
     class AbstractHalstead
     {
         protected const int S = 18;//depends on the human factor (5<=S<=20)
-        protected string identifier = "[a-zA-Z][a-zA-Z0-9]*";//general pattern
+        protected string identifier = "[a-zA-Z_][a-zA-Z0-9_]*";//general pattern
         protected string[] pOperators;//patterns operators
         protected string[] pOperands;//patterns operands
         protected string[] pIOArguments;//patterns input-output arguments
+
+        protected Dictionary<string, uint> tableOperators;//results
+        protected Dictionary<string, uint> tableOperands;//results
+        protected uint[] tableIO = new uint[2];//results
 
         virtual public void PrintTableOperators(){}
         virtual public void PrintTableOperands(){}
@@ -23,21 +27,23 @@ namespace LuaAnalyzConsole
 
     class LuaHalstead : AbstractHalstead
     {
-        private string Exceptions = "(\\-\\-\\[\\[[^\\]]+\\]\\]|--([^\n\\[]+)\n|\"([^\"]+)\")";
-        private Dictionary<string, uint> tableOperators;
-        private Dictionary<string, uint> tableOperands;
-        private uint[] tableIO=new uint[2];
+        private string Exceptions = "(\\-\\-(\\[\\[[^\\]]+\\]\\]))|(\\-\\-([^\n\\[]*)\n?)|(\"([^\"\n]*)\")";//"(\\-\\-\\[\\[[^\\]]+\\]\\]|--([^\n\\[]+)\n|\"([^\"]+)\")";
+        private string OperatorWords = "for|while|function|end|then|if|in|or|and|local|else|elseif|do|return|not|until|repeat|break|dofile|require";
+        private string OperandWords = "nil|true|false";
+        private string OperandNumbers = "(\\s|\\+|\\-|\\*|/|,|=|<|>|\\(|\\)|\\[|\\]|\\{|\\}|\\.\\.)\\-?(\\d+\\.\\d+|\\d+|0[XxХх]\\d+)";
 
-        private bool isNotOperator(string str)
+        private bool isNotWordOperator(string str)
         {
-            for (int i = 0; i < pOperators.Length; i++)
+            /*for (int i = 0; i < pOperators.Length; i++)
                 if ((new Regex("^"+pOperators[i]+"$")).IsMatch(str)) 
                     return false;
-            return true;
+            return true;*/
+            return !(new Regex("^(" + OperatorWords + ")$").IsMatch(str));
         }
+        
         private bool isNotWordLua(string word)//for names var
         {
-            string pattern = "^(for|while|function|end|then|if|in|or|and|nil|true|false|local|else|elseif|do|return|not|until|repeat|break|dofile|require)$";
+            string pattern = "^("+OperatorWords + "|"+OperandWords+")$";
             return !(new Regex(pattern)).IsMatch(word);
         }
 
@@ -56,75 +62,116 @@ namespace LuaAnalyzConsole
             return count;
         }
 
-        static private void SearchOpers(string text, Dictionary<string, uint> table, string[] array, bool isAdd=true)
+        private void countingIO(string data, int id, int idGroup)
         {
-            for (int i = 0; i < array.Length; i++)
+            if (id>=0&&id<tableIO.Length)
             {
-                Regex pattern = new Regex(array[i]);
-                uint count = (uint)pattern.Matches(text).Count;
-                if (count > 0)
+                Regex pattern = new Regex(pIOArguments[id]);
+                foreach (Match m in pattern.Matches(data))
                 {
-                    if (isAdd)
-                    {
-                        if (table.ContainsKey(array[i]))
-                            table[array[i]] += count;
-                        else
-                            table.Add(array[i], count);
-                    }
-                    else
-                    {
-                        if (table.ContainsKey(array[i]))
-                        {
-                            if ((int)(table[array[i]] - count)<= 0)
-                                table.Remove(array[i]);
-                            else
-                                table[array[i]] -= count;
-                        }
-                    }
+                    if (m.Groups.Count > idGroup)
+                        tableIO[id] += (uint)countingArguments(m.Groups[idGroup].Value, id==0);
                 }
             }
         }
 
-        private void SearchIdentifiers(string text, Dictionary<string, uint> table, bool isAdd=true)
-        {//search identifiers..
-            Regex pattern = new Regex("(" + this.identifier + ")");
-            foreach (Match m in pattern.Matches(text))
+        private void TableChangeValue(Dictionary<string, uint> table, bool isAdd, string key, uint count)//isAdd: true - inc, false - derc
+        {
+            if (isAdd)
             {
-                if (m.Groups.Count > 1)
+                if (table.ContainsKey(key))
+                    table[key] += count;
+                else
+                    table.Add(key, count);
+            }
+            else
+            {
+                if (table.ContainsKey(key))
                 {
-                    string value = m.Groups[1].Value.ToString();
-                    if (isAdd)
-                    {
-                        if (isNotWordLua(value))
-                        {
-                            if (table.ContainsKey(value))
-                                table[value]++;
-                            else
-                                table.Add(value, 1);
-                            //tableOperands[value]++;
-                        }
-                    }
-                    else if (table.ContainsKey(value))
-                    {
-                        table[value]--;
-                        if (table[value] == 0)
-                            table.Remove(value);
-                    }
+                    if ((int)(table[key] - count) <= 0)
+                        table.Remove(key);
+                    else
+                        table[key] -= count;
                 }
             }
         }
+
+        private void SearchPattern(string text, Regex pattern, Dictionary<string, uint> table, bool isAdd)
+        {
+            foreach (Match m in pattern.Matches(text))
+            {
+                int index;
+                for (index = m.Groups.Count-1; index>0; index--)
+                    if (m.Groups[index].Value!="") break;
+                TableChangeValue(table, isAdd, m.Groups[index].Value, 1);
+            }
+        }
+
+        private void SearchWords(string text, string wordPattern, Dictionary<string, uint> table, bool isAdd)
+        {
+            Regex pattern = new Regex("^(" + wordPattern + ")\\s|[^a-zA-Z](" + wordPattern + ")$|[^a-zA-Z](" + wordPattern + ")\\s|[^a-zA-Z](" + wordPattern + ")[^a-zA-Z0-9]");//^(if)\s|[^a-zA-Z](if)$|[^a-zA-Z](if)\s
+            SearchPattern(text, pattern, table, isAdd);
+        }
+
+        private void SearchOperators(string text, /*Dictionary<string, uint> table, string[] patterns,*/ bool isAdd=true)
+        {
+            for (int i = 0; i < pOperators.Length; i++)
+            {
+                Regex pattern = new Regex(pOperators[i]);
+                uint count = (uint)pattern.Matches(text).Count;
+                if (count > 0)
+                {
+                    TableChangeValue(tableOperators, isAdd, pOperators[i], count);
+                }
+            }
+            SearchWords(text, OperatorWords, tableOperators, isAdd);
+        }
+
+        private void SearchOperands(string text, Dictionary<string, uint> table, string[] patterns, bool isAdd = true)
+        {//search identifiers..
+            for (int i = 0; i < patterns.Length; i++)
+            {
+                Regex pattern = new Regex("("+patterns[i]+")");//"(" + this.identifier + ")");
+                foreach (Match m in pattern.Matches(text))
+                {
+                    if (m.Groups.Count > 1)
+                    {
+                        string value = m.Groups[1].Value.ToString();
+                        if (isNotWordLua(value))
+                            TableChangeValue(tableOperands, isAdd, value, 1);
+                    }
+                }
+            }
+
+            SearchWords(text, OperandWords, tableOperands, isAdd);
+            SearchPattern(text, (new Regex(this.OperandNumbers)), tableOperands, isAdd);
+        }
+
+       /* private void RemoveOther()//called once
+        {
+            //decr in identifiers...(experimental)
+            /*string text = "";
+            foreach (var key in tableOperands.Keys)
+                text += key+" ";
+            SearchOpers(text, tableOperators, pOperators, false);
+        * /
+            foreach (var key in tableOperands.Keys)
+                SearchOpers(key, tableOperators, pOperators, false);
+        }*/
 
         public LuaHalstead()
         {
             tableOperators = new Dictionary<string, uint>();
             tableOperands = new Dictionary<string, uint>();
             tableIO[0]=0; tableIO[1] = 0;
-            base.pOperators = new string[]{ @"\-\-\[\[[^\]]+\]\]", "[^<=>]=[^<=>]", "[^<=>]>[^<=>]","[^<=>]<[^<=>]","==",">=","<=","or","and",
-                                            "\\^","#","\\*","/","\\-","\\+","return","in",
-                                            "for","while","if","then","end","local","function",",",":","[^\\.0-9]\\.[^\\.0-9]","\\.\\.","%","\"","\\(","\\)",
-                                            "\\{","\\}","\\[","\\]",";","--[^\n]+\n", "else", "elseif", "do", "dofile", "require"
+            base.pOperators = new string[]{ @"(\-\-\[\[[^\]]+\]\])|(--[^\n]+\n)", "[^<=>]=[^<=>]", "[^<=>]>[^<=>]","[^<=>]<[^<=>]","==",">=","<=",
+                                            "\\^","#","\\*","/","[a-zA-Z]?\\-[a-zA-Z]|[a-zA-Z0-9\\s]+\\-[^0-9\\-]","\\+",",",":","[^\\.0-9]\\.[^\\.0-9]","\\.\\.","%",
+                                            "\\(", "\\{", "\\[[^]\n]*\\]"//(), {}, []
+                                            //"\"","\\(","\\)",";",
+                                            //"\\{","\\}","\\[","\\]","--[^\n]+\n",/*"return","in",
+                                            //"for","while","if","then","end","local","function", "else", "elseif", "do", "dofile", "require", "not", "until", "repeat"
                                            };
-            base.pOperands = new string[] { "nil", "true", "false", /*"[^\\.]?\\-?[0-9]+|[0-9]+.[0-9]+"*/"[0-9]+", "\"[^\"]+\""/*, identifier*/ };
+            base.pOperands = new string[] { identifier, "\"[^\"\n]+\""};//{ "nil", "true", "false", "[0-9]+\\.[0-9]+|0[XxХх][0-9]+|\\-?[0-9]+"/*"[0-9]+"*/, "\"[^\"\n]+\"", identifier};
             base.pIOArguments = new string[2] { @"(local)?\s+(([a-zA-Z][a-zA-Z0-9]+,\s*)*[a-zA-Z][a-zA-Z0-9]+)\s*=\s*(get|sampGet)" /*"sampGet"*/, @"(print|printLog|sampAddChatMessage)\((.*)\)" };//0 - input, 1 - output
         }
         ~LuaHalstead()
@@ -143,29 +190,14 @@ namespace LuaAnalyzConsole
         {
             if (script.Exists)
             {
-                string data=File.ReadAllText(script.FullName);
-                SearchOpers(data, tableOperators, pOperators);
-                SearchOpers(data, tableOperands, pOperands);
-                SearchIdentifiers(data, tableOperands);
+                string data = File.ReadAllText(script.FullName);
 
-                {
-                    Regex pattern = new Regex(pIOArguments[0]);
-                    foreach (Match m in pattern.Matches(data))
-                    {
-                        if (m.Groups.Count > 2)
-                            tableIO[0] += (uint)countingArguments(m.Groups[2].Value, true);
-                    }
-                    //tableIO[0] += (uint)pattern.Matches(data).Count;
-                }
+                SearchOperators(data);//, tableOperators, pOperators);
+                //SearchOpers(data, tableOperands, pOperands);
+                SearchOperands(data, tableOperands, pOperands);
 
-                {
-                    Regex pattern = new Regex(pIOArguments[1]);
-                    foreach (Match m in pattern.Matches(data))
-                    {
-                        if (m.Groups.Count > 2)
-                            tableIO[1] += (uint)countingArguments(m.Groups[2].Value);
-                    }
-                }
+                countingIO(data, 0, 2);
+                countingIO(data, 1, 2);
 
                 //decr exceptions..
                 //for (int i=0; i<Exceptions.Length; i++)
@@ -173,16 +205,21 @@ namespace LuaAnalyzConsole
                     Regex pattern = new Regex(Exceptions);
                     foreach (Match m in pattern.Matches(data))
                     {
-                        if (m.Groups.Count > 1)
+                        int index = m.Groups.Count;
+                        for (; index >= 0; index--)
+                            if (m.Groups[index].Value != "")
+                                break;
+                        string value = m.Groups[index].Value.ToString();
+                        //string value = m.Groups[0].Value.ToString();
+                        if (value != "")
                         {
-                            string value = m.Groups[1].Value.ToString();
-                            SearchOpers(value, tableOperators, pOperators, false);
-                            SearchOpers(value, tableOperands, pOperands, false);
-                            SearchIdentifiers(value, tableOperands, false);
+                            SearchOperators(value, false);//, tableOperators, pOperators, false);
+                            //SearchOpers(value, tableOperands, pOperands, false);
+                            SearchOperands(value, tableOperands,pOperands, false);
                         }
                     }
                 }
-                
+
             }
         }
         private void Run(DirectoryInfo dir)
@@ -202,14 +239,16 @@ namespace LuaAnalyzConsole
         {
             Clear();
             Run(script);
+            //RemoveOther();
         }
         public void RestartDir(DirectoryInfo dir)
         {
             Clear();
             Run(dir);
+            //RemoveOther();
         }
 
-        public void PrintTableOperators()
+        override  public void PrintTableOperators()
         {
             Console.WriteLine("Table operators...");
             foreach (var key in tableOperators.Keys)
@@ -218,7 +257,7 @@ namespace LuaAnalyzConsole
 
             }
         }
-        public void PrintTableOperands()
+        override public void PrintTableOperands()
         {
             Console.WriteLine("Table operands...");
             foreach (var key in tableOperands.Keys)
@@ -226,13 +265,13 @@ namespace LuaAnalyzConsole
                 Console.WriteLine(key + ":" + tableOperands[key]);
             }
         }
-        public void PrintTableAgruments()
+        override public void PrintTableAgruments()
         {
             Console.WriteLine("Table arguments...");
             Console.WriteLine("Input args: "+tableIO[0]);
             Console.WriteLine("Output args: "+tableIO[1]);
         }
-        public void PrintRating()
+        override public void PrintRating()
         {
             Console.WriteLine("\n:::::::::::::::::::::::::::\nTotal rating with S=" + S + "\n:::::::::::::::::::::::::::\n");
             int n1 = tableOperators.Count;//number of simple operators
