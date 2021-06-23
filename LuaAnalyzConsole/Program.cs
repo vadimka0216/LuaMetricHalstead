@@ -28,6 +28,12 @@ namespace LuaAnalyzConsole
             {
                 rating.RestartFile(new FileInfo(path));
             }
+            else
+            {
+                Console.WriteLine("Not found or Incorrect path to file/folder...");
+                Console.ReadLine();
+                return;
+            }
             rating.PrintTableOperands();
             rating.PrintTableOperators();
             rating.PrintTableAgruments();
